@@ -320,7 +320,11 @@ def render(jid, panels, target_seconds=0.0):
         idxs = list(range(g0, min(n, g0 + GROUP)))
         gpath = os.path.join(d, f"g{gi:05d}.mp4")
         if len(idxs) == 1:
-            shutil.copy(os.path.join(d, f"c{idxs[0]:06d}.mp4"), gpath)
+            # the clip carries an extra XF tail for the cross-fade — cut it back
+            # to its own visible duration or the group runs long
+            only = idxs[0]
+            run(["ffmpeg", "-y", "-i", os.path.join(d, f"c{only:06d}.mp4"),
+                 "-t", f"{max(0.8, durs[only]):.3f}", "-c", "copy", gpath])
         else:
             args, fc, prev = [], [], "0:v"
             for i in idxs:
