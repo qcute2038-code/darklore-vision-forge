@@ -161,10 +161,10 @@ function Index() {
     return { chars: script.length, words };
   }, [script]);
 
-  const runtime = useMemo(() => {
-    if (shots.length === 0) return 0;
-    return shots.reduce((a, s) => a + Math.max(0.8, s.end - s.start), 0);
-  }, [shots]);
+  // Runtime is the script's own span (first to last timestamp) — the exact
+  // length the exported video is forced to match.
+  const runtime = useMemo(() => scriptDuration(shots), [shots]);
+
 
   // offer to resume whatever this exact script produced last time
   useEffect(() => {
