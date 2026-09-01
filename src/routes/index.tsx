@@ -7,7 +7,7 @@ import {
   renderImage,
   renderBatch,
 } from "@/lib/manga.functions";
-import { fmt, type Segment } from "@/lib/script";
+import { buildTimeline, fmt, type Segment } from "@/lib/script";
 import { buildVideo, webCodecsSupported } from "@/lib/video";
 import { colabHealth, normalizeColabUrl, renderOnColab } from "@/lib/colab";
 
