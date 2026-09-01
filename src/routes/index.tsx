@@ -263,9 +263,17 @@ function Index() {
       const promptStage = pool(batches, PROMPT_CONCURRENCY, async (batch) => {
         if (cancelRef.current) return;
         try {
+          // continuity: hand the model the script lines just before this batch
+          // so a batch boundary never loses the thread of the scene
+          const first = batch[0]!.index;
+          const context = list
+            .filter((s) => s.index >= first - 4 && s.index < first)
+            .map((s) => `[${fmt(s.start)}] ${s.text}`)
+            .join("\n");
           const res = await getPrompts({
             data: {
               bible: b,
+              context,
               segments: batch.map((s) => ({
                 index: s.index,
                 start: s.start,
@@ -275,6 +283,7 @@ function Index() {
               slot: keyTick++,
             },
           });
+
           const prompts = res.prompts as string[];
           batch.forEach((s, i) => {
             const prompt = prompts[i];
