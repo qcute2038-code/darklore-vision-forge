@@ -78,27 +78,29 @@ MOVES = [
     (1.08, 1.22, 0.15, 0.85, 0.85, 0.15),
 ]
 
+# Dark, mysterious grade set. Every look is low-key: brightness is always
+# negative, contrast is lifted and a cold/dim cast is applied, so the whole film
+# keeps one consistent dark tone.
 GRADES = {
-    "night":  ("1.14", "-0.045", "1.05", "0.10:0.02:-0.10"),
-    "sunset": ("1.10", "0.02", "1.30", "0.10:0.01:-0.08"),
-    "warm":   ("1.08", "0.015", "1.22", "0.06:0.00:-0.05"),
-    "cool":   ("1.10", "0.0", "1.12", "-0.06:0.00:0.07"),
-    "tense":  ("1.26", "-0.03", "0.92", "0.07:-0.02:-0.03"),
-    "rain":   ("1.12", "-0.02", "0.95", "-0.05:0.00:0.08"),
-    "bright": ("1.06", "0.035", "1.28", "0.03:0.01:-0.02"),
-    "dream":  ("1.02", "0.03", "1.34", "0.05:-0.01:0.05"),
+    "night":    ("1.30", "-0.13", "0.86", "0.06:0.00:-0.12"),
+    "ember":    ("1.26", "-0.09", "0.94", "0.10:0.00:-0.10"),
+    "interior": ("1.24", "-0.10", "0.88", "0.06:-0.01:-0.07"),
+    "cold":     ("1.28", "-0.12", "0.82", "-0.08:0.00:0.08"),
+    "dread":    ("1.36", "-0.15", "0.78", "0.09:-0.03:-0.04"),
+    "storm":    ("1.26", "-0.13", "0.80", "-0.06:0.00:0.07"),
+    "gloom":    ("1.22", "-0.10", "0.84", "0.00:0.00:0.02"),
+    "memory":   ("1.18", "-0.09", "0.74", "0.04:-0.02:0.06"),
 }
-CYCLE = ["bright", "warm", "cool", "dream", "tense"]
+CYCLE = ["gloom", "night", "cold", "interior", "dread"]
 
 KEYS = [
-    ("night", ["night", "midnight", "moon", "dark room", "starlit", "streetlight"]),
-    ("sunset", ["sunset", "dusk", "golden hour", "sunrise", "dawn", "fire", "flame", "lantern"]),
-    ("rain", ["rain", "storm", "wet", "monsoon", "fog", "mist"]),
-    ("tense", ["angry", "fight", "blood", "scream", "fear", "shadow", "threat", "battle"]),
-    ("bright", ["sunlight", "sunny", "morning", "market", "festival", "smile", "laugh"]),
-    ("dream", ["memory", "dream", "flashback", "sky", "hope", "magic"]),
-    ("warm", ["indoor", "room", "kitchen", "lamp", "warm"]),
-    ("cool", ["cold", "rooftop", "hospital", "office", "school", "train"]),
+    ("night", ["night", "midnight", "moon", "dark room", "starlit", "streetlight", "blackout"]),
+    ("ember", ["fire", "flame", "lantern", "ember", "candle", "torch", "dusk", "sunset", "furnace"]),
+    ("storm", ["rain", "storm", "wet", "monsoon", "fog", "mist", "thunder"]),
+    ("dread", ["angry", "fight", "blood", "scream", "fear", "threat", "battle", "knife", "corpse"]),
+    ("memory", ["memory", "dream", "flashback", "vision", "hallucination"]),
+    ("interior", ["indoor", "room", "kitchen", "lamp", "bulb", "hut", "shed"]),
+    ("cold", ["cold", "rooftop", "hospital", "office", "school", "train", "morgue", "alley"]),
 ]
 
 
@@ -108,6 +110,7 @@ def grade_for(prompt, i):
         if any(w in t for w in words):
             return GRADES[name]
     return GRADES[CYCLE[i % len(CYCLE)]]
+
 
 
 def move_for(i):
@@ -169,20 +172,51 @@ def run(cmd, allow_codec_fallback=True):
     raise RuntimeError(err)
 
 
+def is_real_image(path):
+    """Rejects blank/near-blank or corrupt panels.
+
+    A drawn panel always has structure; a solid fill (the failure mode that used
+    to slip into the video, or get silently skipped) has almost no luminance
+    spread. Falls back to a size check when PIL is unavailable.
+    """
+    try:
+        if os.path.getsize(path) < 4000:
+            return False
+    except Exception:
+        return False
+    try:
+        from PIL import Image, ImageStat
+        with Image.open(path) as im:
+            im.verify()
+        with Image.open(path) as im:
+            small = im.convert("L").resize((32, 18))
+            sd = ImageStat.Stat(small).stddev[0]
+        return sd >= 4.0
+    except ImportError:
+        return True
+    except Exception:
+        return False
+
+
 def fetch(url, path, attempts=4):
+    """Downloads a panel and validates it; raises if it never arrives usable."""
     last = ""
     for a in range(attempts):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "scene-weaver-colab"})
             with urllib.request.urlopen(req, timeout=90) as r, open(path, "wb") as f:
                 shutil.copyfileobj(r, f)
-            if os.path.getsize(path) > 0:
+            if not os.path.getsize(path):
+                last = "empty file"
+            elif not is_real_image(path):
+                last = "blank or corrupt image"
+            else:
                 return
-            last = "empty file"
         except Exception as e:
             last = str(e)
         time.sleep(0.6 * (a + 1))
     raise RuntimeError(f"download failed: {last}")
+
 
 
 # ------------------------------------------------------------------- job ---
@@ -192,10 +226,62 @@ def set_job(jid, **kw):
         JOBS[jid].update(kw)
 
 
-def render(jid, panels):
+def probe_duration(path):
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                            "format=duration", "-of", "csv=p=0", path],
+                           capture_output=True, text=True)
+        return float((r.stdout or "0").strip())
+    except Exception:
+        return 0.0
+
+
+def render(jid, panels, target_seconds=0.0):
     d = os.path.join(WORK, jid)
     os.makedirs(d, exist_ok=True)
     n = len(panels)
+
+    # ---- stage 1: download + validate every panel image ---------------------
+    imgs = [None] * n
+    got = [0]
+
+    def grab(i):
+        img = os.path.join(d, f"i{i:06d}")
+        try:
+            fetch(panels[i]["url"], img)
+            imgs[i] = img
+        except Exception as e:
+            print(f"[scene-weaver] panel {i} unusable ({e}); will reuse a neighbour")
+        got[0] += 1
+        set_job(jid, pct=round(got[0] / n * 18),
+                note=f"Fetching panels · {got[0]}/{n}")
+
+    with ThreadPoolExecutor(max_workers=max(4, LANES * 2)) as ex:
+        list(ex.map(grab, range(n)))
+
+    if not any(imgs):
+        raise RuntimeError("none of the panel images could be downloaded")
+
+    # A blank/failed panel never loses its slice of time: the nearest valid
+    # image covers it, so the mp4 stays exactly as long as the script.
+    subs = 0
+    for i in range(n):
+        if imgs[i]:
+            continue
+        for off in range(1, n):
+            j = i - off
+            k = i + off
+            if j >= 0 and imgs[j]:
+                imgs[i] = imgs[j]
+                break
+            if k < n and imgs[k]:
+                imgs[i] = imgs[k]
+                break
+        subs += 1
+    if subs:
+        print(f"[scene-weaver] {subs} panel(s) substituted with a neighbour image")
+
+    # ---- stage 2: one clip per panel ---------------------------------------
     done = [0]
 
     def one(i):
@@ -203,20 +289,29 @@ def render(jid, panels):
         dur = max(0.8, float(p["end"]) - float(p["start"]))
         # crossfade needs XF extra seconds of tail on every clip but the last
         tail = XF if i < n - 1 else 0.0
-        img = os.path.join(d, f"i{i:06d}")
         clip = os.path.join(d, f"c{i:06d}.mp4")
-        fetch(p["url"], img)
-        run(["ffmpeg", "-y", "-loop", "1", "-i", img, "-t", f"{dur + tail:.3f}",
+        run(["ffmpeg", "-y", "-loop", "1", "-i", imgs[i], "-t", f"{dur + tail:.3f}",
              "-vf", clip_filter(i, dur + tail, p.get("prompt")),
              "-r", str(FPS), *VCODEC, "-pix_fmt", "yuv420p", clip])
-        os.remove(img)
         done[0] += 1
-        set_job(jid, pct=round(done[0] / n * 78),
-                note=f"Rendering panels on GPU · {done[0]}/{n}")
+        set_job(jid, pct=18 + round(done[0] / n * 60),
+                note=f"Rendering panels · {done[0]}/{n}"
+                     + (f" · {subs} substituted" if subs else ""))
         return dur
 
     with ThreadPoolExecutor(max_workers=LANES) as ex:
         durs = list(ex.map(one, range(n)))
+
+    # keep one valid frame around for tail padding, then drop the downloads
+    pad_src = os.path.join(d, "pad_src")
+    last_valid = next((imgs[i] for i in range(n - 1, -1, -1) if imgs[i]), None)
+    if last_valid and os.path.exists(last_valid):
+        shutil.copy(last_valid, pad_src)
+    for path in set(p for p in imgs if p):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
 
     # ---- cross-fade inside groups, then stream-copy concat the groups ------
     groups = []
@@ -247,8 +342,26 @@ def render(jid, panels):
 
         groups.append(gpath)
         gi += 1
-        set_job(jid, pct=78 + round(gi / max(1, math.ceil(n / GROUP)) * 18),
+        set_job(jid, pct=78 + round(gi / max(1, math.ceil(n / GROUP)) * 16),
                 note=f"Stitching · part {gi}/{math.ceil(n / GROUP)}")
+
+    # ---- length guarantee: hit target_seconds exactly ----------------------
+    target = float(target_seconds or 0.0)
+    if target <= 0:
+        target = sum(max(0.8, x) for x in durs)
+
+    have = sum(probe_duration(g) for g in groups)
+    short = target - have
+    if short > 1.0 / FPS and os.path.exists(pad_src):
+        # hold the final frame so the runtime matches the script's last timestamp
+        set_job(jid, pct=95, note="Matching video length to the script…")
+        pad = os.path.join(d, "zpad.mp4")
+        run(["ffmpeg", "-y", "-loop", "1", "-i", pad_src, "-t", f"{short:.3f}",
+             "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,"
+                    f"crop={W}:{H},setsar=1,fps={FPS},"
+                    f"eq=contrast=1.22:brightness=-0.10:saturation=0.84,format=yuv420p",
+             "-r", str(FPS), *VCODEC, "-pix_fmt", "yuv420p", pad])
+        groups.append(pad)
 
     listf = os.path.join(d, "list.txt")
     with open(listf, "w") as f:
@@ -256,17 +369,22 @@ def render(jid, panels):
             f.write(f"file '{g}'\n")
     final = os.path.join(OUT, f"{jid}.mp4")
     set_job(jid, pct=97, note="Writing final mp4…")
+    trim = ["-t", f"{target:.3f}"] if have > target + 1.0 / FPS else []
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listf,
-         "-c", "copy", "-movflags", "+faststart", final])
+         *trim, "-c", "copy", "-movflags", "+faststart", final])
     shutil.rmtree(d, ignore_errors=True)
     size = os.path.getsize(final)
-    set_job(jid, pct=100, state="done", note="Video ready", size=size,
-            download=f"/download/{jid}.mp4")
+    set_job(jid, pct=100, state="done",
+            note=f"Video ready · {probe_duration(final):.1f}s"
+                 + (f" · {subs} panel(s) substituted" if subs else ""),
+            size=size, download=f"/download/{jid}.mp4")
 
 
-def worker(jid, panels):
+
+def worker(jid, panels, target_seconds=0.0):
     try:
-        render(jid, panels)
+        render(jid, panels, target_seconds)
+
     except Exception as e:
         set_job(jid, state="error", note=str(e)[:500])
 
@@ -348,11 +466,18 @@ class Handler(BaseHTTPRequestHandler):
         panels = data.get("panels") or []
         if not panels:
             return self._send(400, {"error": "no panels"})
+        # exact runtime the mp4 must have (the script's last timestamp)
+        try:
+            target = float(data.get("target_seconds") or 0.0)
+        except Exception:
+            target = 0.0
         jid = uuid.uuid4().hex[:12]
         with LOCK:
             JOBS[jid] = {"id": jid, "state": "running", "pct": 0,
-                         "note": "Queued", "panels": len(panels)}
-        threading.Thread(target=worker, args=(jid, panels), daemon=True).start()
+                         "note": "Queued", "panels": len(panels),
+                         "target_seconds": target}
+        threading.Thread(target=worker, args=(jid, panels, target), daemon=True).start()
+
         self._send(200, {"id": jid})
 
 
