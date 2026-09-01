@@ -172,20 +172,51 @@ def run(cmd, allow_codec_fallback=True):
     raise RuntimeError(err)
 
 
+def is_real_image(path):
+    """Rejects blank/near-blank or corrupt panels.
+
+    A drawn panel always has structure; a solid fill (the failure mode that used
+    to slip into the video, or get silently skipped) has almost no luminance
+    spread. Falls back to a size check when PIL is unavailable.
+    """
+    try:
+        if os.path.getsize(path) < 4000:
+            return False
+    except Exception:
+        return False
+    try:
+        from PIL import Image, ImageStat
+        with Image.open(path) as im:
+            im.verify()
+        with Image.open(path) as im:
+            small = im.convert("L").resize((32, 18))
+            sd = ImageStat.Stat(small).stddev[0]
+        return sd >= 4.0
+    except ImportError:
+        return True
+    except Exception:
+        return False
+
+
 def fetch(url, path, attempts=4):
+    """Downloads a panel and validates it; raises if it never arrives usable."""
     last = ""
     for a in range(attempts):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "scene-weaver-colab"})
             with urllib.request.urlopen(req, timeout=90) as r, open(path, "wb") as f:
                 shutil.copyfileobj(r, f)
-            if os.path.getsize(path) > 0:
+            if not os.path.getsize(path):
+                last = "empty file"
+            elif not is_real_image(path):
+                last = "blank or corrupt image"
+            else:
                 return
-            last = "empty file"
         except Exception as e:
             last = str(e)
         time.sleep(0.6 * (a + 1))
     raise RuntimeError(f"download failed: {last}")
+
 
 
 # ------------------------------------------------------------------- job ---
