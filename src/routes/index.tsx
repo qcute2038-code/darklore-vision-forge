@@ -532,8 +532,9 @@ function Index() {
           setVideoPct(p);
           setNote(n);
         },
-        { fileHandle: handle },
+        { fileHandle: handle, targetSeconds: timeline.total },
       );
+
       if (res.kind === "file") {
         setSavedTo(res.fileName);
         setNote(`Saved ${res.fileName}`);
