@@ -542,7 +542,25 @@ export async function buildVideo(
 
     }
 
+    // Length guarantee: if anything came up short of the script's runtime, hold
+    // the last rendered frame until the exact target length is reached.
+    if (targetFrames > frameIndex) {
+      onProgress(99, "Matching video length to the script…");
+      while (frameIndex < targetFrames) {
+        const frame = new VideoFrame(canvas, {
+          timestamp: Math.round((frameIndex * 1_000_000) / FPS),
+          duration: Math.round(1_000_000 / FPS),
+        });
+        await flushGate();
+        encoder.encode(frame, { keyFrame: frameIndex % (FPS * GOP) === 0 });
+        frame.close();
+        frameIndex++;
+        if (encoderError) throw encoderError;
+      }
+    }
+
     onProgress(99, "Finalising file…");
+
     await encoder.flush();
     if (encoderError) throw encoderError;
     muxer.finalize();
