@@ -320,7 +320,11 @@ def render(jid, panels, target_seconds=0.0):
         idxs = list(range(g0, min(n, g0 + GROUP)))
         gpath = os.path.join(d, f"g{gi:05d}.mp4")
         if len(idxs) == 1:
-            shutil.copy(os.path.join(d, f"c{idxs[0]:06d}.mp4"), gpath)
+            # the clip carries an extra XF tail for the cross-fade — cut it back
+            # to its own visible duration or the group runs long
+            only = idxs[0]
+            run(["ffmpeg", "-y", "-i", os.path.join(d, f"c{only:06d}.mp4"),
+                 "-t", f"{max(0.8, durs[only]):.3f}", "-c", "copy", gpath])
         else:
             args, fc, prev = [], [], "0:v"
             for i in idxs:
@@ -372,6 +376,30 @@ def render(jid, panels, target_seconds=0.0):
     trim = ["-t", f"{target:.3f}"] if have > target + 1.0 / FPS else []
     run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listf,
          *trim, "-c", "copy", "-movflags", "+faststart", final])
+
+    # ---- final audit: measure the real mp4 and correct any residual drift ---
+    got = probe_duration(final)
+    drift = target - got
+    if abs(drift) > 1.0 / FPS:
+        fixed = os.path.join(OUT, f"{jid}.fix.mp4")
+        if drift > 0 and os.path.exists(pad_src):
+            tailc = os.path.join(d, "tail.mp4")
+            run(["ffmpeg", "-y", "-loop", "1", "-i", pad_src, "-t", f"{drift:.3f}",
+                 "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,"
+                        f"crop={W}:{H},setsar=1,fps={FPS},"
+                        f"eq=contrast=1.22:brightness=-0.10:saturation=0.84,format=yuv420p",
+                 "-r", str(FPS), *VCODEC, "-pix_fmt", "yuv420p", tailc])
+            listf2 = os.path.join(d, "list2.txt")
+            with open(listf2, "w") as f:
+                f.write(f"file '{final}'\nfile '{tailc}'\n")
+            run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", listf2,
+                 "-c", "copy", "-movflags", "+faststart", fixed])
+        else:
+            run(["ffmpeg", "-y", "-i", final, "-t", f"{target:.3f}",
+                 "-c", "copy", "-movflags", "+faststart", fixed])
+        os.replace(fixed, final)
+        got = probe_duration(final)
+
     shutil.rmtree(d, ignore_errors=True)
     size = os.path.getsize(final)
     set_job(jid, pct=100, state="done",
