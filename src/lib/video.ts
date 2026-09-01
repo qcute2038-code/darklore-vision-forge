@@ -229,6 +229,12 @@ type Opts = {
   width?: number;
   height?: number;
   bitrate?: number;
+  /**
+   * Runtime the finished mp4 MUST have (the script's last timestamp). The
+   * encoder pads the tail with the final frame if anything came up short, so
+   * the video length always matches the script.
+   */
+  targetSeconds?: number;
 };
 
 export async function buildVideo(
@@ -247,7 +253,10 @@ export async function buildVideo(
   const bitrate = opts.bitrate ?? (width >= 1920 ? 8_000_000 : 4_500_000);
 
   const durations = shots.map((s) => Math.max(0.8, s.end - s.start));
-  const totalSeconds = durations.reduce((a, b) => a + b, 0);
+  const panelSeconds = durations.reduce((a, b) => a + b, 0);
+  const totalSeconds = Math.max(panelSeconds, opts.targetSeconds ?? 0);
+  const targetFrames = Math.round((opts.targetSeconds ?? panelSeconds) * FPS);
+
   const totalFrames = Math.max(1, Math.round(totalSeconds * FPS));
 
   onProgress(1, "Starting encoder…");
