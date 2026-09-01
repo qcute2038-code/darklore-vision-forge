@@ -466,11 +466,18 @@ class Handler(BaseHTTPRequestHandler):
         panels = data.get("panels") or []
         if not panels:
             return self._send(400, {"error": "no panels"})
+        # exact runtime the mp4 must have (the script's last timestamp)
+        try:
+            target = float(data.get("target_seconds") or 0.0)
+        except Exception:
+            target = 0.0
         jid = uuid.uuid4().hex[:12]
         with LOCK:
             JOBS[jid] = {"id": jid, "state": "running", "pct": 0,
-                         "note": "Queued", "panels": len(panels)}
-        threading.Thread(target=worker, args=(jid, panels), daemon=True).start()
+                         "note": "Queued", "panels": len(panels),
+                         "target_seconds": target}
+        threading.Thread(target=worker, args=(jid, panels, target), daemon=True).start()
+
         self._send(200, {"id": jid})
 
 
