@@ -381,9 +381,10 @@ def render(jid, panels, target_seconds=0.0):
 
 
 
-def worker(jid, panels):
+def worker(jid, panels, target_seconds=0.0):
     try:
-        render(jid, panels)
+        render(jid, panels, target_seconds)
+
     except Exception as e:
         set_job(jid, state="error", note=str(e)[:500])
 
