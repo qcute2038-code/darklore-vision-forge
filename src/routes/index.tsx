@@ -440,12 +440,11 @@ function Index() {
     setVideoUrl(null);
     setDownloadUrl(null);
 
-    const ready = shotsRef.current
-      .filter((s) => s.url)
-      .sort((a, b) => a.start - b.start)
-      .map((s) => ({ url: s.url as string, start: s.start, end: s.end, prompt: s.prompt }));
+    // Every script timestamp becomes a panel. Panels whose image failed reuse a
+    // neighbour's image instead of vanishing, so the runtime always matches.
+    const timeline = buildTimeline(shotsRef.current);
 
-    if (ready.length === 0) {
+    if (timeline.panels.length === 0) {
       setError("No finished panels to build a video from.");
       return;
     }
@@ -457,12 +456,16 @@ function Index() {
     setPhase("video");
     setVideoPct(0);
     try {
-      const res = await renderOnColab(colabUrl, ready, (p, n) => {
+      if (timeline.substituted > 0)
+        setNote(
+          `${timeline.substituted} panel(s) had no image — covering their time with the nearest panel so the length still matches the script.`,
+        );
+      const res = await renderOnColab(colabUrl, timeline.panels, timeline.total, (p, n) => {
         setVideoPct(p);
         setNote(n);
       });
       setDownloadUrl(res.downloadUrl);
-      setNote("Video ready — download it from Colab");
+      setNote(`Video ready (${fmt(timeline.total)}) — download it from Colab`);
       setPhase("done");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -476,10 +479,8 @@ function Index() {
     setVideoUrl(null);
     setDownloadUrl(null);
 
-    const ready = shotsRef.current
-      .filter((s) => s.url)
-      .sort((a, b) => a.start - b.start)
-      .map((s) => ({ url: s.url as string, start: s.start, end: s.end, prompt: s.prompt }));
+    const timeline = buildTimeline(shotsRef.current);
+    const ready = timeline.panels;
 
     if (ready.length === 0) {
       setError("No finished panels to build a video from.");
@@ -492,9 +493,9 @@ function Index() {
       return;
     }
 
-
-    const seconds = ready.reduce((a, s) => a + Math.max(0.8, s.end - s.start), 0);
+    const seconds = timeline.total;
     const long = seconds > 600; // 10 min+ must stream to disk, not to RAM
+
 
     let handle: FileSystemFileHandle | undefined;
     const picker = (
