@@ -515,13 +515,22 @@ export async function buildVideo(
         if (encoderError) throw encoderError;
       }
 
-      current?.close();
-      current = incoming ?? (next ? await next.catch(() => null) : null);
-      if (!current && i + 1 < shots.length) {
-        // this panel's image is unusable — skip to the following one
-        current = await loadGraded(i + 1).catch(() => null as unknown as ImageBitmap);
-        if (!current) throw new Error(`Panel ${i + 2} image could not be loaded.`);
+      if (i + 1 >= shots.length) {
+        current?.close();
+        current = null;
+      } else {
+        const upcoming =
+          (incoming as ImageBitmap | null) ??
+          (next ? await next.catch(() => null) : null) ??
+          (await loadGradedSafe(i + 1));
+        if (upcoming) {
+          current?.close();
+          current = upcoming;
+        }
+        // else: nothing loadable — hold this frame across the next panel so its
+        // time still lands in the video instead of being skipped.
       }
+
     }
 
     onProgress(99, "Finalising file…");
