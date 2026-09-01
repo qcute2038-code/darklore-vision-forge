@@ -78,27 +78,29 @@ MOVES = [
     (1.08, 1.22, 0.15, 0.85, 0.85, 0.15),
 ]
 
+# Dark, mysterious grade set. Every look is low-key: brightness is always
+# negative, contrast is lifted and a cold/dim cast is applied, so the whole film
+# keeps one consistent dark tone.
 GRADES = {
-    "night":  ("1.14", "-0.045", "1.05", "0.10:0.02:-0.10"),
-    "sunset": ("1.10", "0.02", "1.30", "0.10:0.01:-0.08"),
-    "warm":   ("1.08", "0.015", "1.22", "0.06:0.00:-0.05"),
-    "cool":   ("1.10", "0.0", "1.12", "-0.06:0.00:0.07"),
-    "tense":  ("1.26", "-0.03", "0.92", "0.07:-0.02:-0.03"),
-    "rain":   ("1.12", "-0.02", "0.95", "-0.05:0.00:0.08"),
-    "bright": ("1.06", "0.035", "1.28", "0.03:0.01:-0.02"),
-    "dream":  ("1.02", "0.03", "1.34", "0.05:-0.01:0.05"),
+    "night":    ("1.30", "-0.13", "0.86", "0.06:0.00:-0.12"),
+    "ember":    ("1.26", "-0.09", "0.94", "0.10:0.00:-0.10"),
+    "interior": ("1.24", "-0.10", "0.88", "0.06:-0.01:-0.07"),
+    "cold":     ("1.28", "-0.12", "0.82", "-0.08:0.00:0.08"),
+    "dread":    ("1.36", "-0.15", "0.78", "0.09:-0.03:-0.04"),
+    "storm":    ("1.26", "-0.13", "0.80", "-0.06:0.00:0.07"),
+    "gloom":    ("1.22", "-0.10", "0.84", "0.00:0.00:0.02"),
+    "memory":   ("1.18", "-0.09", "0.74", "0.04:-0.02:0.06"),
 }
-CYCLE = ["bright", "warm", "cool", "dream", "tense"]
+CYCLE = ["gloom", "night", "cold", "interior", "dread"]
 
 KEYS = [
-    ("night", ["night", "midnight", "moon", "dark room", "starlit", "streetlight"]),
-    ("sunset", ["sunset", "dusk", "golden hour", "sunrise", "dawn", "fire", "flame", "lantern"]),
-    ("rain", ["rain", "storm", "wet", "monsoon", "fog", "mist"]),
-    ("tense", ["angry", "fight", "blood", "scream", "fear", "shadow", "threat", "battle"]),
-    ("bright", ["sunlight", "sunny", "morning", "market", "festival", "smile", "laugh"]),
-    ("dream", ["memory", "dream", "flashback", "sky", "hope", "magic"]),
-    ("warm", ["indoor", "room", "kitchen", "lamp", "warm"]),
-    ("cool", ["cold", "rooftop", "hospital", "office", "school", "train"]),
+    ("night", ["night", "midnight", "moon", "dark room", "starlit", "streetlight", "blackout"]),
+    ("ember", ["fire", "flame", "lantern", "ember", "candle", "torch", "dusk", "sunset", "furnace"]),
+    ("storm", ["rain", "storm", "wet", "monsoon", "fog", "mist", "thunder"]),
+    ("dread", ["angry", "fight", "blood", "scream", "fear", "threat", "battle", "knife", "corpse"]),
+    ("memory", ["memory", "dream", "flashback", "vision", "hallucination"]),
+    ("interior", ["indoor", "room", "kitchen", "lamp", "bulb", "hut", "shed"]),
+    ("cold", ["cold", "rooftop", "hospital", "office", "school", "train", "morgue", "alley"]),
 ]
 
 
@@ -108,6 +110,7 @@ def grade_for(prompt, i):
         if any(w in t for w in words):
             return GRADES[name]
     return GRADES[CYCLE[i % len(CYCLE)]]
+
 
 
 def move_for(i):
