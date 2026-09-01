@@ -405,11 +405,29 @@ export async function buildVideo(
   const loadGraded = async (i: number): Promise<ImageBitmap> =>
     gradeBitmap(await loadBitmap(shots[i]!.url), gradeFor(shots[i]!, i));
 
+  /**
+   * Never let one unusable panel abort or shorten the render: fall back to a
+   * neighbouring panel's image so the timeline stays intact.
+   */
+  const loadGradedSafe = async (i: number): Promise<ImageBitmap | null> => {
+    for (const j of [i, i + 1, i - 1, i + 2, i - 2]) {
+      if (j < 0 || j >= shots.length) continue;
+      try {
+        return await loadGraded(j);
+      } catch {
+        /* try the next candidate */
+      }
+    }
+    return null;
+  };
+
   let current: ImageBitmap | null = null;
   let next: Promise<ImageBitmap> | null = null;
 
   try {
-    current = await loadGraded(0);
+    current = await loadGradedSafe(0);
+    if (!current) throw new Error("None of the panel images could be loaded.");
+
 
     for (let i = 0; i < shots.length; i++) {
       if (encoderError) throw encoderError;
